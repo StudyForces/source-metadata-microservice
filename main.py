@@ -46,35 +46,39 @@ def send(message: str) -> None:
 def on_message(channel, method_frame, header_frame, body) -> None:
     rmq_channel.basic_ack(method_frame.delivery_tag)
     req = json.loads(body)
-    url = req["url"]
     upload_id = req["sourceUploadID"]
-    mime_type = req["fileInfo"]["contentType"]
-    file = f"tmp/{upload_id}.{mimeTypesExtension[mime_type]}"
-    if not download_image(session, url, file):
-        return None
+    file_infos = req["fileInfos"]
 
-    data = {
-        "type": "IMAGE",
-        "pages": 1
-    }
+    pages = 0
 
-    if mime_type == "application/pdf":
-        reader = PdfReader(file)
-        data["type"] = "SEQUENCE"
-        data["pages"] = len(reader.pages)
-    elif mime_type == "application/gif":
-        data["type"] = "SEQUENCE"
-        with Image.open('somegif.gif') as im:
-            data["pages"] = im.n_frames
-    else:
-        data["type"] = "IMAGE"
-        data["pages"] = 1
+    os.makedirs(f"tmp/{upload_id}", exist_ok=True)
 
-    os.remove(file)
+    for idx, info in enumerate(file_infos):
+        url = info["url"]
+        mime_type = info["fileInfo"]["contentType"]
+        file = f"tmp/{upload_id}/{idx}.{mimeTypesExtension[mime_type]}"
+        if not download_image(session, url, file):
+            return None
+
+        if mime_type == "application/pdf":
+            reader = PdfReader(file)
+            pages += len(reader.pages)
+        elif mime_type == "application/gif":
+            with Image.open('somegif.gif') as im:
+                pages += im.n_frames
+        else:
+            pages += 1
+
+        os.remove(file)
+
+    os.removedirs(f"tmp/{upload_id}")
 
     res = {
         "sourceUploadID": upload_id,
-        "data": data
+        "data": {
+            "pages": pages,
+            "type": "SEQUENCE" if pages > 0 else "IMAGE"
+        }
     }
 
     send(json.dumps(res, separators=(',', ':'), ensure_ascii=False))
